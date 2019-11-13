@@ -1,5 +1,5 @@
 
-
+#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,6 +65,7 @@ int main(int argc, char **argv)
     struct sockaddr_in clntaddr;
     FILE *fd;
     char buf[4096];
+    char requestLine[4096];
 
     while(1){
         
@@ -74,9 +75,9 @@ int main(int argc, char **argv)
             die("accept failed");
 
         if ((fd = fdopen(clntsock, "r")) == NULL)
-            die("fdopen failed");       
+            continue;       
         
-        if (fgets(buf, sizeof(buf), fd) == NULL) {
+        if (fgets(requestLine, sizeof(requestLine), fd) == NULL) {
             if (ferror(fd))
                 die("IO error");
             else {
@@ -85,30 +86,99 @@ int main(int argc, char **argv)
             }
         } 
         
+        char hostname[500];
+        gethostname(hostname, 500);
+        struct hostent* host;
+        host = gethostbyname(hostname);
+        strcpy(hostname,host->h_name);
+
         char *responseCode;
         char *client_ip = inet_ntoa(clntaddr.sin_addr);
         char *token_separators = "\t \r\n"; // tab, space, new line
-        char *method = strtok(buf, token_separators);
-        char *requestURI = strtok(NULL, token_separators);
+        char *method = strtok(requestLine, token_separators);
+        char *requestURI = strtok(NULL, token_separators); 
         char *httpVersion = strtok(NULL, token_separators);
-        printf("%s, %s, %s\n", method, requestURI, httpVersion);
-        
-        if(strcmp("GET", method) != 0 || ((strcmp("HTTP/1.0", httpVersion) != 0) && strcmp("HTTP/1.1", httpVersion) != 0))
+       
+        if((!method || !requestURI || !httpVersion) 
+                    || strcmp("GET", method) != 0 
+                    || ((strcmp("HTTP/1.0", httpVersion) != 0) 
+                        && strcmp("HTTP/1.1", httpVersion) != 0))
         {
             sendError(clntsock, "501 Not Implemented");
             responseCode = "501 Not Implemented";
         }
-        else if((*requestURI) != '/' || strstr(requestURI, "..")!= NULL){
+        else if((*requestURI) != '/' || (strstr(requestURI, "..")!= NULL)){
             sendError(clntsock, "400 Bad Request");
             responseCode = "400 Bad Request";
         }
         
+        else{
+            while(1){
+                if (fgets(buf, sizeof(buf), fd)== NULL){
+                    if (ferror(fd))
+                        die("IO error");
+                    else{
+                        fclose(fd);
+                        continue;
+                    }
+                }
+                if(strcmp("\r\n", buf) == 0)
+                    break;
+            }
+            
+            if(*(requestURI + strlen(requestURI) - 1) == '/'){
+                strcat(requestURI, "index.html");
+            }
+            
+            strcpy(buf, webRoot);
+            strcat(buf, requestURI);
+            struct stat path;
+            int if_exists = stat(buf, &path);
+            if(if_exists != 0){
+                sendError(clntsock, "404 Not Found");
+                responseCode = "404 Not Found";
+            }
+            else if (S_ISDIR(path.st_mode)){
+                responseCode = "301 Moved Permanently";
+                char msg[2000];
+                snprintf(msg, sizeof(msg), 
+                        "HTTP/1.0 %s \r\n"
+                        "Location: http://%s:%d%s/"
+                        "\r\n"
+                        "<<html><body>"
+                        "<h1>%s</h1>"
+                        "<p>The document has moved"
+                        "<a href=\"http://%s:%d%s/\">here</a>."
+                        "</p>"
+                        "</body></html>", responseCode, hostname, port, 
+                                          requestURI, responseCode, hostname,
+                                          port, requestURI);
+                send(clntsock, msg, strlen(msg), 0);
+            }
+                
+            else{
+                FILE *fp = fopen(buf, "r");
+                responseCode = "200 OK";
+                unsigned int n; 
+                snprintf(buf, sizeof(buf), 
+                        "HTTP/1.0 %s \r\n"
+                        "\r\n", responseCode);
+                send(clntsock, buf, strlen(buf), 0);
+                while((n = fread(buf, 1, sizeof(buf), fp)) > 0 ){
+                    send(clntsock, buf, n, 0);
+                }
+                fclose(fp);
+            }
+        }
         fclose(fd);
-
-
-
-
-
+        if(!method)
+            method = "(null)"; 
+        if(!requestURI)
+            requestURI = "(null)";
+        if(!httpVersion)
+            httpVersion = "(null)";
+        
+        fprintf(stderr, "%s \"%s %s %s\" %s\n", client_ip, method, requestURI, httpVersion, responseCode);
 
     }
 

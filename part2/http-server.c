@@ -13,6 +13,16 @@
 
 static void die(const char *s) { perror(s); exit(1); }
 
+void sendError(int sock, char *message){
+    char msg[500]; 
+    snprintf(msg, sizeof(msg), 
+              "HTTP/1.0 %s \r\n"
+              "\r\n"
+              "<<html><body><h1>%s</h1></body></html>", message, message);
+     send(sock, msg, strlen(msg), 0);
+
+}
+
 int main(int argc, char **argv)
 {
     if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
@@ -75,15 +85,25 @@ int main(int argc, char **argv)
             }
         } 
         
-        if(strncmp("GET ", buf, 4) != 0){
-            printf("failed some shit\n");
-        }
+        char *responseCode;
+        char *client_ip = inet_ntoa(clntaddr.sin_addr);
         char *token_separators = "\t \r\n"; // tab, space, new line
         char *method = strtok(buf, token_separators);
         char *requestURI = strtok(NULL, token_separators);
         char *httpVersion = strtok(NULL, token_separators);
         printf("%s, %s, %s\n", method, requestURI, httpVersion);
-        close(fd);
+        
+        if(strcmp("GET", method) != 0 || ((strcmp("HTTP/1.0", httpVersion) != 0) && strcmp("HTTP/1.1", httpVersion) != 0))
+        {
+            sendError(clntsock, "501 Not Implemented");
+            responseCode = "501 Not Implemented";
+        }
+        else if((*requestURI) != '/' || strstr(requestURI, "..")!= NULL){
+            sendError(clntsock, "400 Bad Request");
+            responseCode = "400 Bad Request";
+        }
+        
+        fclose(fd);
 
 
 

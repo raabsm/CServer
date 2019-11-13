@@ -98,8 +98,9 @@ int main(int argc, char **argv)
         char *method = strtok(requestLine, token_separators);
         char *requestURI = strtok(NULL, token_separators); 
         char *httpVersion = strtok(NULL, token_separators);
+        char *extra = strtok(NULL, token_separators);
        
-        if((!method || !requestURI || !httpVersion) 
+        if((extra || !method || !requestURI || !httpVersion) 
                     || strcmp("GET", method) != 0 
                     || ((strcmp("HTTP/1.0", httpVersion) != 0) 
                         && strcmp("HTTP/1.1", httpVersion) != 0))
@@ -113,6 +114,9 @@ int main(int argc, char **argv)
         }
         
         else{
+            char file_path[1000];
+            strcpy(file_path, requestURI);
+
             while(1){
                 if (fgets(buf, sizeof(buf), fd)== NULL){
                     if (ferror(fd))
@@ -126,12 +130,12 @@ int main(int argc, char **argv)
                     break;
             }
             
-            if(*(requestURI + strlen(requestURI) - 1) == '/'){
-                strcat(requestURI, "index.html");
+            if(*(file_path + strlen(file_path) - 1) == '/'){
+                strcat(file_path, "index.html");
             }
             
             strcpy(buf, webRoot);
-            strcat(buf, requestURI);
+            strcat(buf, file_path);
             struct stat path;
             int if_exists = stat(buf, &path);
             if(if_exists != 0){
@@ -143,7 +147,7 @@ int main(int argc, char **argv)
                 char msg[2000];
                 snprintf(msg, sizeof(msg), 
                         "HTTP/1.0 %s \r\n"
-                        "Location: http://%s:%d%s/"
+                        "Location: http://%s:%d%s/\r\n"
                         "\r\n"
                         "<<html><body>"
                         "<h1>%s</h1>"
@@ -151,8 +155,8 @@ int main(int argc, char **argv)
                         "<a href=\"http://%s:%d%s/\">here</a>."
                         "</p>"
                         "</body></html>", responseCode, hostname, port, 
-                                          requestURI, responseCode, hostname,
-                                          port, requestURI);
+                                          file_path, responseCode, hostname,
+                                          port, file_path);
                 send(clntsock, msg, strlen(msg), 0);
             }
                 

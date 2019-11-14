@@ -18,7 +18,7 @@ void sendError(int sock, char *message){
     snprintf(msg, sizeof(msg), 
               "HTTP/1.0 %s \r\n"
               "\r\n"
-              "<<html><body><h1>%s</h1></body></html>", message, message);
+              "<html><body><h1>%s</h1></body></html>", message, message);
      send(sock, msg, strlen(msg), 0);
 
 }
@@ -33,8 +33,30 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    unsigned short port = atoi(argv[1]);
+    const char *submit_form =
+        "HTTP/1.0 200 OK\r\n"
+        "\r\n"
+        "<html><body>\n"
+        "<h1>mdb-lookup</h1>\n"
+        "<p>\n"
+        "<form method=GET action=/mdb-lookup>\n"
+        "lookup: <input type=text name=key>\n"
+        "<input type=submit>\n"
+        "</form>\n"
+        "<p>\n";
+
+    unsigned short servport = atoi(argv[1]);
     char *webRoot = argv[2];
+    char *dbHost = argv[3];
+    unsigned short dbPort = atoi(argv[4]);
+    char *db_ip;
+
+    struct hostent *db_he;
+    if((db_he = gethostbyname(dbHost)) == NULL)
+        die("gethostbyname failed");
+    db_ip = inet_ntoa(*(struct in_addr *)db_he->h_addr);    
+
+    //Create 
 
     // Create a listening socket (also called server socket) 
 
@@ -42,13 +64,29 @@ int main(int argc, char **argv)
     if ((servsock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
         die("socket failed");
 
-    // Construct local address structure
+    int dbsock;
+    if ((dbsock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+        die("socket failed");
+
+    
+    struct sockaddr_in dbaddr;
+
+    memset(&dbaddr, 0, sizeof(dbaddr));
+    dbaddr.sin_family = AF_INET;
+    dbaddr.sin_addr.s_addr = inet_addr(db_ip); // any network interface
+    dbaddr.sin_port = htons(dbPort);
+
+     if (connect(dbsock, (struct sockaddr *)&dbaddr, sizeof(dbaddr)) < 0) {
+         die("connect failed");
+     }
+
+    // Construct server address structure
 
     struct sockaddr_in servaddr;
     memset(&servaddr, 0, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY); // any network interface
-    servaddr.sin_port = htons(port);
+    servaddr.sin_port = htons(servport);
 
     // Bind to the local address
 
@@ -129,49 +167,79 @@ int main(int argc, char **argv)
                 if(strcmp("\r\n", buf) == 0)
                     break;
             }
-            
+             
             if(*(file_path + strlen(file_path) - 1) == '/'){
                 strcat(file_path, "index.html");
             }
-            
-            strcpy(buf, webRoot);
-            strcat(buf, file_path);
-            struct stat path;
-            int if_exists = stat(buf, &path);
-            if(if_exists != 0){
-                sendError(clntsock, "404 Not Found");
-                responseCode = "404 Not Found";
-            }
-            else if (S_ISDIR(path.st_mode)){
-                responseCode = "301 Moved Permanently";
-                char msg[2000];
-                snprintf(msg, sizeof(msg), 
-                        "HTTP/1.0 %s \r\n"
-                        "Location: http://%s:%d%s/\r\n"
-                        "\r\n"
-                        "<<html><body>"
-                        "<h1>%s</h1>"
-                        "<p>The document has moved"
-                        "<a href=\"http://%s:%d%s/\">here</a>."
-                        "</p>"
-                        "</body></html>", responseCode, hostname, port, 
-                                          file_path, responseCode, hostname,
-                                          port, file_path);
-                send(clntsock, msg, strlen(msg), 0);
-            }
-                
-            else{
-                FILE *fp = fopen(buf, "r");
-                responseCode = "200 OK";
-                unsigned int n; 
-                snprintf(buf, sizeof(buf), 
-                        "HTTP/1.0 %s \r\n"
-                        "\r\n", responseCode);
-                send(clntsock, buf, strlen(buf), 0);
-                while((n = fread(buf, 1, sizeof(buf), fp)) > 0 ){
-                    send(clntsock, buf, n, 0);
+            char *mdb_lookup = "/mdb-lookup";
+            if (strncmp(mdb_lookup, file_path, strlen(mdb_lookup)) == 0){
+                send(clntsock, submit_form, strlen(submit_form), 0);
+                char key[4096] = "?key=";
+                if((strlen(file_path) >= strlen(key) + strlen(mdb_lookup)) 
+                        && strncmp(key, file_path + strlen(mdb_lookup),strlen(key))==0){
+                    strcpy(key, file_path + strlen(mdb_lookup) + strlen(key));
+                    key[strlen(key)+1] = 0;
+                    key[strlen(key)] = '\n';
+                    send(dbsock, key, strlen(key), 0);
+                    FILE *dbInfo;
+                    dbInfo  = fdopen(dbsock, "r");
+                    char *table = "<p><table border>\n";
+                    send(clntsock, table, strlen(table), 0);
+                    while(fgets(key, sizeof(key), dbInfo) != NULL){
+                        if(key[0] == '\n')
+                            break;
+                        char tableEntry[1000];
+                        snprintf(tableEntry, sizeof(tableEntry), "<tr><td>%s\n", key);
+                        send(clntsock, tableEntry, strlen(tableEntry), 0);
+                    }
+                    table = "</table>\n"
+                            "</body></html>\n";
+                    send(clntsock, table, strlen(table), 0);
                 }
-                fclose(fp);
+                responseCode = "200 OK";               
+
+            }
+            else{
+            
+                strcpy(buf, webRoot);
+                strcat(buf, file_path);
+                struct stat path;
+                int if_exists = stat(buf, &path);
+                if(if_exists != 0){
+                    sendError(clntsock, "404 Not Found");
+                    responseCode = "404 Not Found";
+                }
+                else if (S_ISDIR(path.st_mode)){
+                    responseCode = "301 Moved Permanently";
+                    char msg[2000];
+                    snprintf(msg, sizeof(msg), 
+                            "HTTP/1.0 %s \r\n"
+                            "Location: http://%s:%d%s/\r\n"
+                            "\r\n"
+                            "<<html><body>"
+                            "<h1>%s</h1>"
+                            "<p>The document has moved"
+                            "<a href=\"http://%s:%d%s/\">here</a>."
+                            "</p>"
+                            "</body></html>", responseCode, hostname, servport, 
+                                              file_path, responseCode, hostname,
+                                              servport, file_path);
+                    send(clntsock, msg, strlen(msg), 0);
+                }
+                    
+                else{
+                    FILE *fp = fopen(buf, "r");
+                    responseCode = "200 OK";
+                    unsigned int n; 
+                    snprintf(buf, sizeof(buf), 
+                            "HTTP/1.0 %s \r\n"
+                            "\r\n", responseCode);
+                    send(clntsock, buf, strlen(buf), 0);
+                    while((n = fread(buf, 1, sizeof(buf), fp)) > 0 ){
+                        send(clntsock, buf, n, 0);
+                    }
+                    fclose(fp);
+                }
             }
         }
         fclose(fd);

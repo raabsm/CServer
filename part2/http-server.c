@@ -216,7 +216,7 @@ int main(int argc, char **argv)
                             "HTTP/1.0 %s \r\n"
                             "Location: http://%s:%d%s/\r\n"
                             "\r\n"
-                            "<<html><body>"
+                            "<html><body>"
                             "<h1>%s</h1>"
                             "<p>The document has moved"
                             "<a href=\"http://%s:%d%s/\">here</a>."

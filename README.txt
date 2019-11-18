@@ -1,11 +1,14 @@
-This file should contain:
+Samuel Raab
+smr2218
 
-  - your name
-  - your UNI
-  - lab assignment number
-  - description for each part
-  
-The description should indicate whether your solution for the part is
-working or not.  You may also want to include anything else you would
-like to communicate to the grader such as extra functionalities you
-implemented or how you tried to fix your non-working code.
+part 1:
+
+my website works.
+
+part 2: 
+
+I successfully created a web-server that upon request both prints out the
+request and sends back a correctly formatted HTML page.  There  are no
+valgrind errors when I tested the program
+
+
